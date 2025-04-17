@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     backend::Backend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Color, Style},
     text::{Span, Spans},
     widgets::Paragraph,
@@ -47,84 +47,109 @@ pub const LOADING_MESSAGES: &[&str] = &[
 
 /// Renders the loading screen with logo and progress indicator
 pub fn draw_loading_screen<B: Backend>(frame: &mut Frame<B>, area: Rect, app: &App) {
-    // Render logo
-    let logo_spans: Vec<Spans> = LUMON_LOGO
-        .iter()
-        .map(|&line| Spans::from(Span::styled(line, app.palette.fg_style())))
-        .collect();
-
+    // Check if the area is large enough for the logo
     let logo_w = LUMON_LOGO[0].len() as u16;
     let logo_h = LUMON_LOGO.len() as u16;
-    let x = area.x + (area.width.saturating_sub(logo_w)) / 2;
-    let y = area.y + (area.height.saturating_sub(logo_h)) / 2;
-    let rect = Rect::new(x, y, logo_w, logo_h);
-
-    let logo_para =
-        Paragraph::new(logo_spans).style(app.palette.bg_style());
-    frame.render_widget(logo_para, rect);
-
-    // Render loading message and progress bar
-    if area.height > logo_h + y + 3 {
-        // Determine which message to show based on progress
-        let total_messages = LOADING_MESSAGES.len();
-        
-        let message_idx = if app.progress_percentage >= 100.0 {
-            total_messages - 1
-        } else if total_messages > 1 {
-            let scaled_progress = app.progress_percentage / 100.0 * (total_messages - 1) as f32;
-            scaled_progress.floor() as usize
-        } else {
-            0
-        };
-        
-        let message = LOADING_MESSAGES[message_idx];
     
-        let message_span = Span::styled(
-            message,
-            Style::default().fg(Color::White),
-        );
+    // Determine if we have enough space for the full logo
+    let has_space_for_logo = area.width >= logo_w && area.height >= logo_h + 5; // +5 for progress bar
+    
+    if has_space_for_logo {
+        // Render full logo
+        let logo_spans: Vec<Spans> = LUMON_LOGO
+            .iter()
+            .map(|&line| Spans::from(Span::styled(line, app.palette.fg_style())))
+            .collect();
+
+        let x = area.x + (area.width.saturating_sub(logo_w)) / 2;
+        let y = area.y + (area.height.saturating_sub(logo_h + 5)) / 2; // Center vertically accounting for progress bar
+        let rect = Rect::new(x, y, logo_w.min(area.width), logo_h.min(area.height - 5));
+
+        let logo_para = Paragraph::new(logo_spans).style(app.palette.bg_style());
+        frame.render_widget(logo_para, rect);
         
-        // Layout for message and progress bar
-        let vertical_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(y + logo_h + 2),
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Length(2),
-                Constraint::Min(0),
-            ])
-            .split(area);
-            
-        // Render message
-        let message_para = Paragraph::new(Spans::from(message_span))
-            .alignment(ratatui::layout::Alignment::Center);
-        frame.render_widget(message_para, vertical_layout[1]);
-        
-        // Create progress bar
-        let progress_width = vertical_layout[3].width.saturating_sub(15); // Make it less wide to leave room for percentage
-        let filled = (progress_width as f32 * (app.progress_percentage / 100.0)) as u16;
-        
-        // Create a simple one-line progress bar
-        let mut progress_bar = String::new();
-        
-        progress_bar.push('[');
-        for i in 0..progress_width {
-            if i < filled {
-                progress_bar.push('=');
-            } else {
-                progress_bar.push(' ');
-            }
+        // Place progress indicator below logo
+        let progress_y = y + logo_h + 2;
+        if progress_y < area.y + area.height {
+            draw_progress_indicator(frame, area, app, progress_y);
         }
-        progress_bar.push(']');
+    } else {
+        // For small windows, show only text and progress bar
+        let text = "LUMON INDUSTRIES";
+        let text_spans = Spans::from(Span::styled(text, app.palette.fg_style()));
         
-        // Add percentage at the end
-        progress_bar.push_str(&format!(" {:3.0}%", app.progress_percentage));
+        let text_y = area.y + area.height / 3;
+        let text_rect = Rect::new(area.x, text_y, area.width, 1);
         
-        let progress_text = Paragraph::new(progress_bar)
+        let text_para = Paragraph::new(text_spans)
             .alignment(ratatui::layout::Alignment::Center)
             .style(app.palette.fg_style());
         
-        frame.render_widget(progress_text, vertical_layout[3]);
+        frame.render_widget(text_para, text_rect);
+        
+        // Place progress indicator in the middle
+        let progress_y = text_y + 2;
+        if progress_y < area.y + area.height {
+            draw_progress_indicator(frame, area, app, progress_y);
+        }
     }
+}
+
+/// Helper function to draw progress indicator
+fn draw_progress_indicator<B: Backend>(frame: &mut Frame<B>, area: Rect, app: &App, y_position: u16) {
+    // Determine which message to show based on progress
+    let total_messages = LOADING_MESSAGES.len();
+    
+    let message_idx = if app.progress_percentage >= 100.0 {
+        total_messages - 1
+    } else if total_messages > 1 {
+        let scaled_progress = app.progress_percentage / 100.0 * (total_messages - 1) as f32;
+        scaled_progress.floor() as usize
+    } else {
+        0
+    };
+    
+    let message = LOADING_MESSAGES[message_idx];
+
+    let message_span = Span::styled(
+        message,
+        Style::default().fg(Color::White),
+    );
+    
+    // Message rect
+    let message_rect = Rect::new(area.x, y_position, area.width, 1);
+    
+    // Progress bar rect
+    let progress_rect = Rect::new(area.x, y_position + 1, area.width, 1);
+    
+    // Render message
+    let message_para = Paragraph::new(Spans::from(message_span))
+        .alignment(ratatui::layout::Alignment::Center);
+    frame.render_widget(message_para, message_rect);
+    
+    // Create progress bar
+    let progress_width = area.width.saturating_sub(15); // Make it less wide to leave room for percentage
+    let filled = (progress_width as f32 * (app.progress_percentage / 100.0)) as u16;
+    
+    // Create a simple one-line progress bar
+    let mut progress_bar = String::new();
+    
+    progress_bar.push('[');
+    for i in 0..progress_width {
+        if i < filled {
+            progress_bar.push('=');
+        } else {
+            progress_bar.push(' ');
+        }
+    }
+    progress_bar.push(']');
+    
+    // Add percentage at the end
+    progress_bar.push_str(&format!(" {:3.0}%", app.progress_percentage));
+    
+    let progress_text = Paragraph::new(progress_bar)
+        .alignment(ratatui::layout::Alignment::Center)
+        .style(app.palette.fg_style());
+    
+    frame.render_widget(progress_text, progress_rect);
 } 

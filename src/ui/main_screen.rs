@@ -2,16 +2,41 @@ use ratatui::{
     Frame,
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect, Alignment},
-    text::Spans,
+    text::{Span, Spans},
     widgets::{Block, Borders, Paragraph},
+    style::{Style, Color, Modifier},
 };
 use std::rc::Rc;
 
 use crate::app::{App, DataContainer};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
+// Small Lumon logo for the title bar
+const SMALL_LOGO: &[&str] = &[
+    "╭──────────╮",
+    "│  LUMON   │",
+    "│ INDUSTRY │",
+    "╰──────────╯",
+];
+
 /// Renders the main screen with data bins
 pub fn draw_main_screen<B: Backend>(frame: &mut Frame<B>, area: Rect, app: &App) {
+    // Define minimum required dimensions for proper display
+    let min_width = 50;
+    let min_height = 20;
+    
+    // Check if window is too small to render properly
+    if area.width < min_width || area.height < min_height {
+        // Window is too small, render a simple message instead
+        let message = format!("Window too small\nMin size: {}x{}", min_width, min_height);
+        let message_widget = Paragraph::new(message)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+        
+        frame.render_widget(message_widget, area);
+        return;
+    }
+    
     // Create the main layout
     let main_layout = create_main_layout(area);
 
@@ -53,17 +78,24 @@ fn create_main_layout(area: Rect) -> Rc<[Rect]> {
     let container_height = 6;  // Actual height needed for containers
     let padding = 1;           // Equal padding above and below
     
+    // For very small windows, adjust constraints to ensure minimum functionality
+    let min_content_height = 5; // Minimum height for main content (grid)
+    
+    // Check if window is too small for standard layout
+    let is_small_window = area.height < 25;
+    
+    // Create adaptive layout
     Layout::default()
         .direction(Direction::Vertical)
-        .margin(2)
+        .margin(if is_small_window { 1 } else { 2 })
         .constraints([
-            Constraint::Length(3),           // Title bar
+            Constraint::Length(3),           // Title bar (original height)
             Constraint::Length(1),           // Title divider
-            Constraint::Min(10),             // Main content (grid)
+            Constraint::Min(min_content_height), // Main content (grid) with minimum height
             Constraint::Length(1),           // Thick divider
-            Constraint::Length(padding),     // Top padding
+            Constraint::Length(if is_small_window { 0 } else { padding }),     // Top padding (remove in small window)
             Constraint::Length(container_height), // Container section
-            Constraint::Length(padding),     // Bottom padding
+            Constraint::Length(if is_small_window { 0 } else { padding }),     // Bottom padding (remove in small window)
             Constraint::Length(1),           // Thin divider
             Constraint::Length(1),           // Footer text
         ])
@@ -72,10 +104,90 @@ fn create_main_layout(area: Rect) -> Rc<[Rect]> {
 
 /// Draw the title bar at the top of the screen
 fn draw_title_bar<B: Backend>(frame: &mut Frame<B>, area: Rect, app: &App) {
-    let title = Block::default()
+    // Create title block with borders
+    let title_block = Block::default()
         .borders(Borders::ALL)
         .style(app.palette.fg_style());
-    frame.render_widget(title, area);
+    
+    // Render the block
+    frame.render_widget(title_block.clone(), area);
+    
+    // Calculate inner area for content
+    let inner_area = title_block.inner(area);
+    
+    // Calculate overall completion percentage
+    let total_completion: f32 = app.containers.iter()
+        .map(|container| container.progress)
+        .sum::<f32>() / (app.containers.len() as f32);
+    
+    let completion_percent = (total_completion).round() as u32;
+    let completion_text = format!("{}% Complete", completion_percent);
+    
+    // Add padding for logo
+    let logo_width = 12; // Width of the Lumon logo
+    let logo_padding = logo_width + 2;
+    
+    // Create title content with username on the left and completion on the right
+    let title_spans = vec![
+        // Username on the left
+        Span::styled(
+            format!(" {} ", app.username),
+            app.palette.fg_style()
+        ),
+        // Spacer to push completion percentage to the right
+        Span::styled(
+            format!("{:width$}", "", width = inner_area.width as usize - 
+                   format!(" {} ", app.username).len() - 
+                   completion_text.len() - 
+                   logo_padding as usize),
+            app.palette.fg_style()
+        ),
+        // Completion percentage on the right
+        Span::styled(
+            completion_text.clone(),
+            app.palette.fg_style()
+        ),
+    ];
+    
+    // Create paragraph with the title content
+    let title_para = Paragraph::new(Spans::from(title_spans));
+    
+    // Render the title content inside the block's inner area
+    frame.render_widget(title_para, inner_area);
+    
+    // Draw the logo at the absolute right edge
+    draw_logo_at_right_edge(frame);
+}
+
+/// Draw the Lumon logo at the absolute right edge of the screen
+fn draw_logo_at_right_edge<B: Backend>(frame: &mut Frame<B>) {
+    let screen_size = frame.size();
+    let logo_width = 12; // Fixed width based on logo content
+    let logo_height = 4; // Height based on logo lines
+    
+    // Position at the absolute right edge of the screen
+    let logo_x = screen_size.width.saturating_sub(logo_width) - 2;
+    let logo_y = 1; // Small offset from top for visual balance
+    
+    // Create the logo rectangle
+    let logo_rect = Rect::new(logo_x, logo_y, logo_width, logo_height);
+    
+    // Create the logo spans with distinct styling
+    let logo_spans: Vec<Spans> = SMALL_LOGO
+        .iter()
+        .map(|&line| {
+            Spans::from(Span::styled(
+                line,
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            ))
+        })
+        .collect();
+    
+    // Render the logo
+    let logo_para = Paragraph::new(logo_spans);
+    frame.render_widget(logo_para, logo_rect);
 }
 
 /// Draw footer text centered below the skinny divider
@@ -102,40 +214,87 @@ fn draw_data_containers<B: Backend>(frame: &mut Frame<B>, area: Rect, app: &App)
     // Calculate container sizes
     let total_gap_width = 4 * 5;
     let available_width = area.width.saturating_sub(total_gap_width);
-    let container_width = available_width / 5;
+    let container_width = (available_width / 5).max(1); // Ensure minimum width of 1
     
-    // Create container layout
-    let containers = create_container_layout(area, container_width);
+    // If window is very small, draw simplified containers
+    let is_extremely_narrow = area.width < 40;
     
-    // Get container positions for click detection
-    let container_positions = [
-        containers[0], containers[2], containers[4], containers[6], containers[8]
-    ];
-    
-    // Process clicks on containers
-    process_container_clicks(app, &container_positions);
-    
-    // Render all containers
-    let container_indices = [0, 2, 4, 6, 8];
-    for (idx, &container_idx) in container_indices.iter().enumerate() {
-        let container_rect = containers[container_idx];
-        draw_single_container(frame, container_rect, idx, &app.containers[idx], app);
+    if is_extremely_narrow {
+        // Draw a simplified representation for very narrow windows
+        let simple_container_layout = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+            ])
+            .split(area);
+        
+        // Render each container as a simple progress indicator
+        for (idx, container_rect) in simple_container_layout.iter().enumerate() {
+            if idx < app.containers.len() {
+                let container_data = &app.containers[idx];
+                
+                // Draw a simple progress character
+                let progress_char = if container_data.progress >= 100.0 {
+                    "■" // Full
+                } else if container_data.progress >= 75.0 {
+                    "▣" // 3/4 full
+                } else if container_data.progress >= 50.0 {
+                    "▢" // Half full
+                } else if container_data.progress >= 25.0 {
+                    "□" // 1/4 full
+                } else {
+                    "·" // Empty
+                };
+                
+                let progress_text = Paragraph::new(progress_char)
+                    .alignment(Alignment::Center)
+                    .style(app.palette.fg_style());
+                
+                frame.render_widget(progress_text, *container_rect);
+            }
+        }
+    } else {
+        // Create container layout for normal windows
+        let containers = create_container_layout(area, container_width);
+        
+        // Get container positions for click detection
+        let container_positions = [
+            containers[0], containers[2], containers[4], containers[6], containers[8]
+        ];
+        
+        // Process clicks on containers
+        process_container_clicks(app, &container_positions);
+        
+        // Render all containers
+        let container_indices = [0, 2, 4, 6, 8];
+        for (idx, &container_idx) in container_indices.iter().enumerate() {
+            let container_rect = containers[container_idx];
+            draw_single_container(frame, container_rect, idx, &app.containers[idx], app);
+        }
     }
 }
 
 /// Create the horizontal layout for containers with gaps
 fn create_container_layout(area: Rect, container_width: u16) -> Rc<[Rect]> {
+    // For very small windows, reduce the gaps between containers
+    let is_small_window = area.width < 80;
+    let gap_width = if is_small_window { 1 } else { 5 };
+    
     Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Length(container_width),
-            Constraint::Length(5),
+            Constraint::Length(gap_width),
             Constraint::Length(container_width),
-            Constraint::Length(5),
+            Constraint::Length(gap_width),
             Constraint::Length(container_width),
-            Constraint::Length(5),
+            Constraint::Length(gap_width),
             Constraint::Length(container_width),
-            Constraint::Length(5),
+            Constraint::Length(gap_width),
             Constraint::Length(container_width),
         ])
         .split(area)
@@ -298,9 +457,25 @@ fn create_progress_bar_parts(
 
 /// Draw a grid of random numbers in the main content area
 fn draw_number_grid<B: Backend>(frame: &mut Frame<B>, area: Rect, app: &App) {
+    // Skip rendering if area is too small
+    if area.width < 5 || area.height < 3 {
+        let message = "···";
+        let message_widget = Paragraph::new(message)
+            .alignment(Alignment::Center)
+            .style(app.palette.fg_style());
+        
+        frame.render_widget(message_widget, area);
+        return;
+    }
+
     // Calculate grid dimensions
     let (num_cols, num_rows, horizontal_spacing, vertical_spacing) = 
         calculate_grid_dimensions(area);
+        
+    // Skip if we can't fit a grid
+    if num_cols == 0 || num_rows == 0 {
+        return;
+    }
 
     // Create RNG with static seed for consistent numbers between renders
     let mut base_rng = StdRng::seed_from_u64(42);
@@ -339,15 +514,42 @@ fn draw_number_grid<B: Backend>(frame: &mut Frame<B>, area: Rect, app: &App) {
 
 /// Calculate the grid dimensions based on available area
 fn calculate_grid_dimensions(area: Rect) -> (u16, u16, u16, u16) {
-    let horizontal_spacing = 6;  // Space between numbers horizontally
-    let vertical_spacing = 2;    // Space between numbers vertically
+    // Minimum spacing requirements
+    let min_horizontal_spacing = 3;
+    let min_vertical_spacing = 1;
+    
+    // Default spacing when we have enough room
+    let default_horizontal_spacing = 6;  // Space between numbers horizontally
+    let default_vertical_spacing = 2;    // Space between numbers vertically
+    
+    // Adaptive spacing based on available area
+    let horizontal_spacing = if area.width < 30 { 
+        min_horizontal_spacing 
+    } else { 
+        default_horizontal_spacing 
+    };
+    
+    let vertical_spacing = if area.height < 10 { 
+        min_vertical_spacing 
+    } else { 
+        default_vertical_spacing 
+    };
     
     // Calculate max columns and rows that will fit
     let max_width = area.width.saturating_sub(2);
     let max_height = area.height.saturating_sub(1);
     
-    let num_cols = max_width / horizontal_spacing;
-    let num_rows = max_height / vertical_spacing;
+    let num_cols = if max_width >= horizontal_spacing { 
+        max_width / horizontal_spacing 
+    } else { 
+        0 
+    };
+    
+    let num_rows = if max_height >= vertical_spacing { 
+        max_height / vertical_spacing 
+    } else { 
+        0 
+    };
     
     (num_cols, num_rows, horizontal_spacing, vertical_spacing)
 }
@@ -448,21 +650,24 @@ fn render_digit<B: Backend>(
             let scaled_size = (scale_factor.round() as usize).max(1);
             
             if scaled_size == 2 {
-                // 2x scale - use a 2x2 grid of the digit
-                let grid_positions = [
-                    (x, y),                                // Top-left
-                    (x.saturating_add(1), y),              // Top-right
-                    (x, y.saturating_add(1)),              // Bottom-left
-                    (x.saturating_add(1), y.saturating_add(1)),    // Bottom-right
+                // 2x scale - use a 2x2 grid of the digit, but check boundaries
+                // Check if we have room for 2x2 grid
+                let max_x = area.x + area.width - 1;
+                let max_y = area.y + area.height - 1;
+                
+                // Only use positions that are within bounds
+                let positions = [
+                    (x, y),
+                    (if x < max_x { x + 1 } else { x }, y),
+                    (x, if y < max_y { y + 1 } else { y }),
+                    (if x < max_x { x + 1 } else { x }, if y < max_y { y + 1 } else { y }),
                 ];
                 
-                for &pos in &grid_positions {
-                    if pos.0 < area.x + area.width && pos.1 < area.y + area.height {
-                        let digit_rect = Rect::new(pos.0, pos.1, 1, 1);
-                        let digit_text = Paragraph::new(format!("{}", digit))
-                            .style(app.palette.fg_style());
-                        frame.render_widget(digit_text, digit_rect);
-                    }
+                for &pos in &positions {
+                    let digit_rect = Rect::new(pos.0, pos.1, 1, 1);
+                    let digit_text = Paragraph::new(format!("{}", digit))
+                        .style(app.palette.fg_style());
+                    frame.render_widget(digit_text, digit_rect);
                 }
             } else {
                 // Default: just render at normal size

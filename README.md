@@ -27,7 +27,7 @@ Make sure you have Rust installed. If not, install it through [rustup](https://r
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/lumon-mdr.git
+git clone https://github.com/theabecaster/lumon-mdr.git
 cd lumon-mdr
 
 # Build the project

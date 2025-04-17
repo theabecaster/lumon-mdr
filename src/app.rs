@@ -1,17 +1,19 @@
 use crate::theme::Palette;
 use rand::{Rng, rng};
-use crossterm::event::{MouseEvent, MouseEventKind};
+use crossterm::event::{MouseEvent, MouseEventKind, KeyCode};
 use std::collections::HashMap;
 
 pub enum AppState {
+    Login,    
     Loading, 
     Main,
+    Prize,  
 }
 
 // Structure to track data for each container
 pub struct DataContainer {
-    pub count: u16,            // Current count (0-100)
-    pub progress: f32,         // Progress percentage (0.0-100.0)
+    pub count: u16,            
+    pub progress: f32,         
 }
 
 impl DataContainer {
@@ -38,14 +40,23 @@ pub struct App {
     pub palette: Palette,
     pub running: bool,
     pub state: AppState,
+    pub username: String,           
+    pub username_cursor: usize,     
+    pub show_login_error: bool,     
     pub loading_timer: u16,
     pub progress_percentage: f32,
     pub completion_delay: u8,
+    pub completion_timer: u8,          
+    pub prize_name: String,            
     pub animation_counter: u32,
     pub mouse_position: Option<(u16, u16)>,
     pub last_clicked: Option<(u16, u16)>,
     pub containers: Vec<DataContainer>,
-    pub replaced_numbers: HashMap<(usize, usize), u16>,  // Map of (col, row) to new digit
+    pub replaced_numbers: HashMap<(usize, usize), u16>,  
+    pub window_size_warning: bool,
+    pub show_size_warning: bool,
+    pub current_width: u16,
+    pub current_height: u16,
 }
 
 impl App {
@@ -59,34 +70,105 @@ impl App {
         Self { 
             palette, 
             running: true, 
-            state: AppState::Loading,
+            state: AppState::Login,   
+            username: String::new(),
+            username_cursor: 0,
+            show_login_error: false,  
             loading_timer: 0,
             progress_percentage: 0.0,
             completion_delay: 0,
+            completion_timer: 0,
+            prize_name: String::new(),
             animation_counter: 0,
             mouse_position: None,
             last_clicked: None,
             containers,
             replaced_numbers: HashMap::new(),
+            window_size_warning: false,
+            show_size_warning: false,
+            current_width: 0,
+            current_height: 0,
          }
     }
 
-    pub fn on_key(&mut self, key: crossterm::event::KeyCode) {
-        match key {
-            crossterm::event::KeyCode::Char('q') => {
-                self.running = false;
+    pub fn on_key(&mut self, key: KeyCode) {
+        // If size warning is showing, dismiss it and process no further
+        if self.show_size_warning {
+            self.show_size_warning = false;
+            return;
+        }
+
+        match self.state {
+            AppState::Login => {
+                // Any input clears previous error
+                self.show_login_error = false;
+                
+                match key {
+                    KeyCode::Char(c) => {
+                        if self.username.len() < 25 { // Limit username length
+                            self.username.insert(self.username_cursor, c);
+                            self.username_cursor += 1;
+                        }
+                    },
+                    KeyCode::Backspace => {
+                        if self.username_cursor > 0 {
+                            self.username_cursor -= 1;
+                            self.username.remove(self.username_cursor);
+                        }
+                    },
+                    KeyCode::Delete => {
+                        if self.username_cursor < self.username.len() {
+                            self.username.remove(self.username_cursor);
+                        }
+                    },
+                    KeyCode::Left => {
+                        if self.username_cursor > 0 {
+                            self.username_cursor -= 1;
+                        }
+                    },
+                    KeyCode::Right => {
+                        if self.username_cursor < self.username.len() {
+                            self.username_cursor += 1;
+                        }
+                    },
+                    KeyCode::Enter => {
+                        if !self.username.trim().is_empty() {
+                            self.state = AppState::Loading;
+                        } else {
+                            // Set error flag if username is empty
+                            self.show_login_error = true;
+                        }
+                    },
+                    KeyCode::Esc => {
+                        self.running = false;
+                    },
+                    _ => {}
+                }
             },
-            // Number keys 1-5 add to specific containers
-            crossterm::event::KeyCode::Char('1') => self.add_to_container(0, 5),
-            crossterm::event::KeyCode::Char('2') => self.add_to_container(1, 5),
-            crossterm::event::KeyCode::Char('3') => self.add_to_container(2, 5),
-            crossterm::event::KeyCode::Char('4') => self.add_to_container(3, 5),
-            crossterm::event::KeyCode::Char('5') => self.add_to_container(4, 5),
-            // Space adds random values
-            crossterm::event::KeyCode::Char(' ') => self.add_random(),
-            // R key resets all containers
-            crossterm::event::KeyCode::Char('r') => self.reset_containers(),
-            _ => {}
+            AppState::Prize => {
+                match key {
+                    KeyCode::Char('q') | KeyCode::Esc => {
+                        self.running = false;
+                    },
+                    KeyCode::Char('r') | KeyCode::Enter | KeyCode::Char(' ') => {
+                        // Reset all containers and go back to main screen
+                        self.reset_containers();
+                        self.state = AppState::Main;
+                    },
+                    _ => {}
+                }
+            },
+            _ => {
+                // Existing key handling
+                match key {
+                    KeyCode::Char('q') => {
+                        self.running = false;
+                    },
+                    // R key resets all containers
+                    KeyCode::Char('r') => self.reset_containers(),
+                    _ => {}
+                }
+            }
         }
     }
     
@@ -167,31 +249,50 @@ impl App {
         // Increment animation counter at a steady rate
         self.animation_counter = self.animation_counter.wrapping_add(1);
         
-        if let AppState::Loading = self.state {
-            self.loading_timer += 1;
+        match self.state {
+            AppState::Loading => {
+                self.loading_timer += 1;
 
-            if self.loading_timer >= 3 {
-                self.loading_timer = 0;
-                
-                if self.progress_percentage >= 100.0 {
-                    self.progress_percentage = 100.0;
-                    self.completion_delay += 1;
+                if self.loading_timer >= 3 {
+                    self.loading_timer = 0;
                     
-                    if self.completion_delay >= 2 {
-                        self.state = AppState::Main;
-                    }
-                } else {
-                    let mut rng = rng();
-                    let progress_increment = rng.random_range(0.0..13.0);
-                    
-                    let new_progress = self.progress_percentage + progress_increment;
-                    if new_progress > 100.0 {
+                    if self.progress_percentage >= 100.0 {
                         self.progress_percentage = 100.0;
+                        self.completion_delay += 1;
+                        
+                        if self.completion_delay >= 2 {
+                            self.state = AppState::Main;
+                        }
                     } else {
-                        self.progress_percentage = new_progress;
+                        let mut rng = rng();
+                        let progress_increment = rng.random_range(0.0..13.0);
+                        
+                        let new_progress = self.progress_percentage + progress_increment;
+                        if new_progress > 100.0 {
+                            self.progress_percentage = 100.0;
+                        } else {
+                            self.progress_percentage = new_progress;
+                        }
                     }
                 }
-            }
+            },
+            AppState::Main => {
+                // Check if all containers are filled
+                if self.is_all_complete() {
+                    // Start completion timer
+                    self.completion_timer += 1;
+                    
+                    // After 3 seconds (9 ticks at 300ms per tick), transition to prize screen
+                    if self.completion_timer >= 9 {
+                        self.select_random_prize();
+                        self.state = AppState::Prize;
+                    }
+                } else {
+                    // Reset timer if containers are not full
+                    self.completion_timer = 0;
+                }
+            },
+            _ => {}
         }
     }
 
@@ -201,5 +302,29 @@ impl App {
             container.count = 0;
             container.progress = 0.0;
         }
+    }
+
+    // Check if all containers are 100% full
+    pub fn is_all_complete(&self) -> bool {
+        self.containers.iter().all(|container| container.is_full())
+    }
+
+    // Select a random prize for the user
+    pub fn select_random_prize(&mut self) {
+        let prizes = [
+            "Waffle Party",
+            "Melon Bar",
+            "Finger Trap",
+            "Caricature Portrait",
+            "Dance Experience",
+            "Music/Dance Experience",
+            "Wellness Session",
+            "Coffee Cozy",
+            "Choice of Desk Toy",
+        ];
+        
+        let mut rng = rng();
+        let prize_idx = rng.random_range(0..prizes.len());
+        self.prize_name = prizes[prize_idx].to_string();
     }
 }
