@@ -17,11 +17,13 @@ pub fn draw_main_screen<B: Backend>(frame: &mut Frame<B>, area: Rect, app: &App)
 
     // Draw title bar
     draw_title_bar(frame, main_layout[0], app);
+    
+    // Draw thick divider under title bar
+    draw_horizontal_divider(frame, main_layout[1], app, true);
 
     // Draw main content (number grid)
-    let content_area = main_layout[1];
+    let content_area = main_layout[2];
     let main_content = Block::default()
-        .borders(Borders::ALL)
         .style(app.palette.fg_style());
     
     frame.render_widget(main_content.clone(), content_area);
@@ -29,20 +31,20 @@ pub fn draw_main_screen<B: Backend>(frame: &mut Frame<B>, area: Rect, app: &App)
     draw_number_grid(frame, inner_area, app);
 
     // Draw thick horizontal divider above data containers
-    draw_horizontal_divider(frame, main_layout[2], app, true);
+    draw_horizontal_divider(frame, main_layout[3], app, true);
 
     // Top padding is empty
     
     // Draw data containers
-    draw_data_containers(frame, main_layout[4], app);
+    draw_data_containers(frame, main_layout[5], app);
     
     // Bottom padding is empty
     
     // Draw thin horizontal divider below data containers
-    draw_horizontal_divider(frame, main_layout[6], app, false);
+    draw_horizontal_divider(frame, main_layout[7], app, false);
     
     // Draw footer text
-    draw_footer_text(frame, main_layout[7], app);
+    draw_footer_text(frame, main_layout[8], app);
 }
 
 /// Creates the main layout structure
@@ -56,6 +58,7 @@ fn create_main_layout(area: Rect) -> Rc<[Rect]> {
         .margin(2)
         .constraints([
             Constraint::Length(3),           // Title bar
+            Constraint::Length(1),           // Title divider
             Constraint::Min(10),             // Main content (grid)
             Constraint::Length(1),           // Thick divider
             Constraint::Length(padding),     // Top padding
@@ -71,7 +74,6 @@ fn create_main_layout(area: Rect) -> Rc<[Rect]> {
 fn draw_title_bar<B: Backend>(frame: &mut Frame<B>, area: Rect, app: &App) {
     let title = Block::default()
         .borders(Borders::ALL)
-        .title("Lumon MDR")
         .style(app.palette.fg_style());
     frame.render_widget(title, area);
 }
