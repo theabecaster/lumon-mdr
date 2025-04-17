@@ -78,11 +78,15 @@ fn draw_title_bar<B: Backend>(frame: &mut Frame<B>, area: Rect, app: &App) {
 
 /// Draw footer text centered below the skinny divider
 fn draw_footer_text<B: Backend>(frame: &mut Frame<B>, area: Rect, app: &App) {
-    // Generate a realistic memory address based on app pointer address
+    // Generate a memory address based on app pointer address
     let app_ptr = app as *const App;
-    let memory_addr = format!("0x{:016x}", app_ptr as usize);
+    let memory_addr1 = format!("0x{:016x}", app_ptr as usize);
     
-    let footer_text = format!("LUMON INDUSTRIES — MACRODATA REFINEMENT DIVISION [{}]", memory_addr);
+    // Generate a second memory address based on containers pointer
+    let containers_ptr = &app.containers as *const Vec<DataContainer>;
+    let memory_addr2 = format!("0x{:016x}", containers_ptr as usize);
+    
+    let footer_text = format!("{} : {}", memory_addr1, memory_addr2);
     
     let footer_widget = Paragraph::new(footer_text)
         .alignment(Alignment::Center)
